@@ -16,6 +16,41 @@ struct Order {
     Order* next = nullptr;
 };
 
+struct OrderPool {
+    std::vector<Order> pool;
+    Order* free_head = nullptr;
+
+    // construct the pool on object creation
+    OrderPool(size_t n = 4000000) {
+        if (n == 0) return;  // empty pool: free_head stays nullptr, allocate() returns null
+        pool.resize(n); // populate and fault vector with slots
+        // link all orders (except the end) to the next order initially of the "free list"
+        for (size_t i = 0; i < pool.size() - 1; ++i) {
+            pool[i].next = &pool[i + 1];
+        }
+        pool[pool.size() - 1].next = nullptr; // end of vector order has nothing past it
+
+        free_head = &pool[0]; // first empty slot is the free head
+    }
+
+    // allocate() returns a free order from the free order list
+    Order* allocate() {
+        if (free_head == nullptr) {
+            return nullptr;
+        }
+
+        Order* free_order_slot = free_head;
+        free_head = free_head->next;
+        return free_order_slot;
+    }
+
+    // dellocate() adds used order back to the free order list
+    void deallocate(Order* o) {
+        o->next = free_head;
+        free_head = o;
+    }
+};
+
 struct PriceLevel {
     Order* head = nullptr; // orders closer to this are old orders (earlier in time priority)
     Order* tail = nullptr; // orders closer to this for new orders (later in time priority)

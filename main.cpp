@@ -48,5 +48,22 @@ int main() {
     }
 
     std::cout << "PriceLevel tests: PASS\n";
+
+   {   // pool: allocate, deallocate, reuse, exhaustion
+        OrderPool pool(3);                  // tiny pool so we can drain it
+        Order* a = pool.allocate();
+        Order* b = pool.allocate();
+        Order* c = pool.allocate();
+        CHECK(a != nullptr && b != nullptr && c != nullptr);
+        CHECK(a != b && b != c);            // distinct slots
+        CHECK(pool.allocate() == nullptr);  // exhausted — 4th alloc fails
+
+        pool.deallocate(b);                 // return one
+        Order* d = pool.allocate();
+        CHECK(d == b);                      // LIFO: freed slot comes back first
+    }
+    std::cout << "OrderPool tests: PASS\n";
+
+
     return 0;
 }
