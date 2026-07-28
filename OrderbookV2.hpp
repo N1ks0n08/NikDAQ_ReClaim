@@ -100,6 +100,70 @@ struct PriceLevel {
     }
 };
 
+// utilize 1 large vector, with the base price as the midpoint
+// 800 price levels below the base price, and 800 price levels above the base price ($8 below, $8 above)
+// therefore total array size of 1601
+// only for base prices at or above $75
+// floor: PriceLevels[0] (0-799: loewr $8 range)
+// midpoint/base price: PriceLevels[800]
+// ceiling: PriceLevels[1600] (801-1600: upper $8 range)
+// the math for indexing thoruhg pirce levels:
+// index = 800 - (base price - current price)
+// or, since the price is unsigned: 
+// index = (current price + 800) - base price
+// (current price + 800 ensures no negative numbers)
+// NOTE: $75 = 7500 in uint32_t format (7500 cents, 1 tick is 1 cent)
+struct PriceLevelArray {
+    std::vector<PriceLevel> PriceLevels;
+    uint32_t base_price;
+
+    PriceLevelArray(uint32_t price) {
+        if (price < 7500) {
+            std::cout << "Error: price has to be $75 or above!";
+            return;
+        }
+
+        PriceLevels.resize(1601);
+        base_price = price;
+    }
+
+    bool in_range(uint32_t price) {
+        return (price >= (base_price - 800)) && (price <= (base_price + 800));
+    }
+
+    PriceLevel* get_price_level (uint32_t price) {
+        if (in_range(price)) {
+            return &PriceLevels[(price + 800) - base_price];
+        }
+
+        std::cout << "Error: Price out of range!\n";
+        return nullptr;
+    }
+
+    // return a pointer to the best bid (null if none)
+    // iterate from top to bottom (highest possible BUY order)
+    PriceLevel* best_bid() {
+        for (size_t i = PriceLevels.size(); i-- > 0; ) {
+            if (PriceLevels[i].head != nullptr && PriceLevels[i].head->side == 'B') {
+                return &PriceLevels[i];
+            }
+        }
+
+        return nullptr;
+    }
+
+    // return a pointer to the best ask (null if none)
+    PriceLevel* best_ask() {
+        for (size_t i = 0; i < PriceLevels.size(); ++i) {
+            if (PriceLevels[i].head != nullptr && PriceLevels[i].head->side == 'S') {
+                return &PriceLevels[i];
+            }
+        }
+
+        return nullptr;
+    }
+};
+
 struct Fill {
     uint64_t aggressive_order_id;
     uint64_t passive_order_id;
