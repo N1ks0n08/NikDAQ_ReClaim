@@ -5,6 +5,9 @@
 #include <vector>
 #include <algorithm>
 #include <cstddef>
+#include <cstring>
+#include <unordered_map>
+#include <iostream>
 
 struct Order {
     uint64_t order_id;
@@ -36,6 +39,7 @@ struct OrderPool {
     // allocate() returns a free order from the free order list
     Order* allocate() {
         if (free_head == nullptr) {
+            std::cout << "ERROR: Orderpool limit exceeded!\n";
             return nullptr;
         }
 
@@ -177,5 +181,157 @@ struct ReplaceResult {
 };
 
 struct OrderBook {
-    
+    std::string asset_symbol;                               // name of the asset being traded
+    OrderPool orderpool;                                    // pre-allocated order pool
+    PriceLevelArray price_level_array;                      // pirce level array for the specific asset
+    std::unordered_map<uint64_t, Order*> order_index_map;   // allows for mutating/accessing order via order id in the memory pool
+
+    // generate an orderbook depending on the asset symbol and price given
+    OrderBook(std::string symbol, uint32_t base_price)
+    : price_level_array(base_price) {
+        asset_symbol = symbol;
+    };
+
+    // match() returns a vector of Fill's that may happen when matching incoming orders against the book
+    std::vector<Fill> match(Order* o) {
+        std::vector<Fill> results;
+
+        // BUY ORDER
+        if (o->side == 'B') {
+            // while opposing orders exist, match it there
+            // else, return
+            PriceLevel* current_price_level = price_level_array.best_ask();
+            if (current_price_level == nullptr) {
+                std::cout << "NO CURRENT BEST ASKS EXIST!\n";
+                return results;
+            } else {
+                while (current_price_level != nullptr) {
+                    if (o->price >= current_price_level->head->price) {
+                        Fill fill;
+                        fill.aggressive_order_id = o->order_id;
+                        fill.passive_order_id = current_price_level->head->order_id;
+                        uint32_t matched_shares = std::min(o->quantity, current_price_level->head->quantity);
+                        fill.price = current_price_level->head->price;
+                        fill.quantity = matched_shares;
+                        o->quantity -= matched_shares;
+                        current_price_level->head->quantity -= matched_shares;
+                        results.emplace_back(fill);
+
+                        // check if current head order of a price level is filled
+                        // then, once it is filled, remove it from the order id map, unlink from the price level, then deallocate it
+                        if (current_price_level->head->quantity == 0) {
+                            Order* filled = current_price_level->head;
+                            order_index_map.erase(filled->order_id);
+                            current_price_level->unlink(filled);
+                            orderpool.deallocate(filled);
+                        }
+
+                        // check if the current price level needs to be updated
+                        if (current_price_level->head == nullptr && current_price_level->tail == nullptr) {
+                            current_price_level = price_level_array.best_ask();
+                        }
+
+                        if (o->quantity == 0) {
+                            std::cout << "ORDER FULLY FILLED\n";
+                            return results;
+                        }
+                    } else {
+                        return results;
+                    }
+                }
+            }
+        }
+        // SELL ORDER
+        else {
+            // while opposing orders exist, match it there
+            // else, return
+           PriceLevel* current_price_level = price_level_array.best_bid();
+            if (current_price_level == nullptr) {
+                std::cout << "NO CURRENT BEST BIDS EXIST!\n";
+                return results;
+            } else {
+                while (current_price_level != nullptr) {
+                    if (o->price <= current_price_level->head->price) {
+                        Fill fill;
+                        fill.aggressive_order_id = o->order_id;
+                        fill.passive_order_id = current_price_level->head->order_id;
+                        uint32_t matched_shares = std::min(o->quantity, current_price_level->head->quantity);
+                        fill.price = current_price_level->head->price;
+                        fill.quantity = matched_shares;
+                        o->quantity -= matched_shares;
+                        current_price_level->head->quantity -= matched_shares;
+                        results.emplace_back(fill);
+
+                        // check if current head order of a price level is filled
+                        // then, once it is filled, remove it from the order id map, unlink from the price level, then deallocate it
+                        if (current_price_level->head->quantity == 0) {
+                            Order* filled = current_price_level->head;
+                            order_index_map.erase(filled->order_id);
+                            current_price_level->unlink(filled);
+                            orderpool.deallocate(filled);
+                        }
+
+                        // check if the current price level needs to be updated
+                        if (current_price_level->head == nullptr && current_price_level->tail == nullptr) {
+                            current_price_level = price_level_array.best_bid();
+                        }
+
+                        if (o->quantity == 0) {
+                            std::cout << "ORDER FULLY FILLED\n";
+                            return results;
+                        }
+                    } else {
+                        return results;
+                    }
+                }
+            }
+        }
+        return results;
+    }
+
+    // add() takes an Order object and returns a vector of Fill's from calling match()
+    // and ultimately adds or removes the order from the book utilizing the memory pool
+    std::vector<Fill> add(Order o) {
+        std::vector<Fill> results = match(&o);
+
+        // if the order is still not filled, add it to the orderbook
+        // allocate from the orderpool first, then create an order id -> Order* entry, then add it to it's corresponding price level
+        if (o.quantity != 0) {
+            Order* slot = orderpool.allocate();
+            order_index_map[o.order_id] = slot;
+            *slot = o; // fill slot with the actual order details
+            price_level_array.get_price_level(o.price)->push_back(order_index_map[o.order_id]);
+            std::cout << "ORDER ADDED TO ORDERBOOK\n";
+        } else {
+            std::cout << "ORDER NOT ADDED: FILLED UPON MATCH\n";
+        }
+        return results;
+    }
+
+    // cancel() returns a bool letting the caller knonw if the order was successfully canceled
+    // or fialed to do so (due to various reasons such as order id bieng invalid or order no longer existing)
+    bool cancel(uint64_t order_id) {
+        if (order_index_map.count(order_id)) {
+            price_level_array.get_price_level(order_index_map[order_id]->price)->unlink(order_index_map[order_id]);
+            orderpool.deallocate(order_index_map[order_id]);
+            order_index_map.erase(order_id);
+            std::cout << "ORDER SUCCESSFULLY CANCELED\n";
+            return true;
+        }
+        std::cout << "FAILED TO CANCEL ORDER\n";
+        return false;
+    }
+
+
+    // replace() returns a ReplaceResult that combines the results from cancel() + add() (in this order)
+    ReplaceResult replace(uint64_t old_order_id, Order new_order) {
+        ReplaceResult result;
+
+        result.replaced = cancel(old_order_id);
+        if (result.replaced) {
+            result.fills = add(new_order);
+        }
+
+        return result;
+    };
 };
