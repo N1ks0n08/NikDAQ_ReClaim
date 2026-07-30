@@ -6,10 +6,8 @@
     std::cerr << "FAILED: " #cond "  (line " << __LINE__ << ")\n"; \
     std::abort(); } } while (0)
 
-// Helper: fetch the resting order at a given price (or nullptr) via the array,
-// so tests can assert on book state without poking internals everywhere.
 static Order* head_at(OrderBook& ob, uint32_t price) {
-    PriceLevel* lvl = ob.price_level_array.get_price_level(price);
+    PriceLevel* lvl = ob.price_level_array_manager.get_price_level(price);
     return lvl ? lvl->head : nullptr;
 }
 
@@ -19,39 +17,39 @@ int main() {
     {   // TEST 1: single full fill
         OrderBook ob("TEST", 10000);
         ob.add(Order{1, 10000, 25, 'S'});
-        auto fills = ob.add(Order{2, 10000, 25, 'B'});
+        auto fills = ob.add(Order{2, 10000, 25, 'B'}).fills;
         CHECK(fills.size() == 1);
         CHECK(fills[0].price == 10000);
         CHECK(fills[0].aggressive_order_id == 2);
         CHECK(fills[0].passive_order_id == 1);
         CHECK(fills[0].quantity == 25);
-        CHECK(ob.price_level_array.best_ask() == nullptr);
-        CHECK(ob.price_level_array.best_bid() == nullptr);
+        CHECK(ob.price_level_array_manager.best_ask() == nullptr);
+        CHECK(ob.price_level_array_manager.best_bid() == nullptr);
     }
     std::cout << "Test 1 (SINGLE FULL FILL): PASS\n";
 
     {   // TEST 2: partial fill, resting bigger
         OrderBook ob("TEST", 10000);
         ob.add(Order{1, 10000, 25, 'S'});
-        auto fills = ob.add(Order{2, 10000, 10, 'B'});
+        auto fills = ob.add(Order{2, 10000, 10, 'B'}).fills;
         CHECK(fills.size() == 1);
         CHECK(fills[0].price == 10000);
         CHECK(fills[0].quantity == 10);
         CHECK(fills[0].passive_order_id == 1);
         Order* r = head_at(ob, 10000);
         CHECK(r != nullptr && r->quantity == 15);
-        CHECK(ob.price_level_array.best_bid() == nullptr);
+        CHECK(ob.price_level_array_manager.best_bid() == nullptr);
     }
     std::cout << "Test 2 (PARTIAL - RESTING BIGGER): PASS\n";
 
     {   // TEST 3: partial fill, aggressor bigger
         OrderBook ob("TEST", 10000);
         ob.add(Order{1, 10000, 10, 'S'});
-        auto fills = ob.add(Order{2, 10000, 25, 'B'});
+        auto fills = ob.add(Order{2, 10000, 25, 'B'}).fills;
         CHECK(fills.size() == 1);
         CHECK(fills[0].quantity == 10);
         CHECK(fills[0].passive_order_id == 1);
-        CHECK(ob.price_level_array.best_ask() == nullptr);
+        CHECK(ob.price_level_array_manager.best_ask() == nullptr);
         Order* r = head_at(ob, 10000);
         CHECK(r != nullptr && r->order_id == 2 && r->quantity == 15 && r->side == 'B');
     }
@@ -61,7 +59,7 @@ int main() {
         OrderBook ob("TEST", 10000);
         ob.add(Order{1, 10000, 5, 'S'});
         ob.add(Order{2, 10001, 8, 'S'});
-        auto fills = ob.add(Order{3, 10001, 10, 'B'});
+        auto fills = ob.add(Order{3, 10001, 10, 'B'}).fills;
         CHECK(fills.size() == 2);
         CHECK(fills[0].price == 10000);
         CHECK(fills[0].quantity == 5);
@@ -69,22 +67,22 @@ int main() {
         CHECK(fills[1].price == 10001);
         CHECK(fills[1].quantity == 5);
         CHECK(fills[1].passive_order_id == 2);
-        CHECK(head_at(ob, 10000) == nullptr);            // level 10000 emptied
+        CHECK(head_at(ob, 10000) == nullptr);
         Order* r = head_at(ob, 10001);
         CHECK(r != nullptr && r->quantity == 3);
-        CHECK(ob.price_level_array.best_bid() == nullptr);
+        CHECK(ob.price_level_array_manager.best_bid() == nullptr);
     }
     std::cout << "Test 4 (MULTI-LEVEL SWEEP): PASS\n";
 
     {   // TEST 5: price improvement
         OrderBook ob("TEST", 10000);
         ob.add(Order{1, 10000, 10, 'S'});
-        auto fills = ob.add(Order{2, 10005, 10, 'B'});   // willing to pay 10005
+        auto fills = ob.add(Order{2, 10005, 10, 'B'}).fills;
         CHECK(fills.size() == 1);
-        CHECK(fills[0].price == 10000);                  // fills at resting price
+        CHECK(fills[0].price == 10000);
         CHECK(fills[0].quantity == 10);
-        CHECK(ob.price_level_array.best_ask() == nullptr);
-        CHECK(ob.price_level_array.best_bid() == nullptr);
+        CHECK(ob.price_level_array_manager.best_ask() == nullptr);
+        CHECK(ob.price_level_array_manager.best_bid() == nullptr);
     }
     std::cout << "Test 5 (PRICE IMPROVEMENT): PASS\n";
 
@@ -92,11 +90,11 @@ int main() {
         OrderBook ob("TEST", 10000);
         ob.add(Order{1, 10000, 10, 'S'});
         ob.add(Order{2, 10000, 10, 'S'});
-        auto f1 = ob.add(Order{3, 10000, 4, 'B'});
-        auto f2 = ob.add(Order{4, 10000, 3, 'B'});
+        auto f1 = ob.add(Order{3, 10000, 4, 'B'}).fills;
+        auto f2 = ob.add(Order{4, 10000, 3, 'B'}).fills;
         CHECK(f1.size() == 1 && f1[0].passive_order_id == 1 && f1[0].quantity == 4);
         CHECK(f2.size() == 1 && f2[0].passive_order_id == 1 && f2[0].quantity == 3);
-        PriceLevel* lvl = ob.price_level_array.get_price_level(10000);
+        PriceLevel* lvl = ob.price_level_array_manager.get_price_level(10000);
         CHECK(lvl->head->order_id == 1 && lvl->head->quantity == 3);
         CHECK(lvl->tail->order_id == 2 && lvl->tail->quantity == 10);
     }
@@ -105,7 +103,7 @@ int main() {
     {   // TEST 7: no cross
         OrderBook ob("TEST", 10000);
         ob.add(Order{1, 10000, 10, 'S'});
-        auto fills = ob.add(Order{2, 9999, 10, 'B'});    // bid below ask, no cross
+        auto fills = ob.add(Order{2, 9999, 10, 'B'}).fills;
         CHECK(fills.empty());
         Order* a = head_at(ob, 10000);
         CHECK(a != nullptr && a->quantity == 10);
@@ -114,14 +112,14 @@ int main() {
     }
     std::cout << "Test 7 (NO CROSS): PASS\n";
 
-    {   // TEST 8: sweep exhausts book, remainder rests at own price
+    {   // TEST 8: sweep exhausts book
         OrderBook ob("TEST", 10000);
         ob.add(Order{1, 10000, 10, 'S'});
-        auto fills = ob.add(Order{2, 10010, 50, 'B'});
+        auto fills = ob.add(Order{2, 10010, 50, 'B'}).fills;
         CHECK(fills.size() == 1);
         CHECK(fills[0].price == 10000);
         CHECK(fills[0].quantity == 10);
-        CHECK(ob.price_level_array.best_ask() == nullptr);
+        CHECK(ob.price_level_array_manager.best_ask() == nullptr);
         Order* b = head_at(ob, 10010);
         CHECK(b != nullptr && b->order_id == 2 && b->quantity == 40);
     }
@@ -131,7 +129,7 @@ int main() {
         OrderBook ob("TEST", 10000);
         ob.add(Order{1, 10001, 5, 'B'});
         ob.add(Order{2, 10000, 8, 'B'});
-        auto fills = ob.add(Order{3, 10000, 10, 'S'});
+        auto fills = ob.add(Order{3, 10000, 10, 'S'}).fills;
         CHECK(fills.size() == 2);
         CHECK(fills[0].price == 10001);
         CHECK(fills[0].quantity == 5);
@@ -142,18 +140,18 @@ int main() {
         CHECK(head_at(ob, 10001) == nullptr);
         Order* r = head_at(ob, 10000);
         CHECK(r != nullptr && r->quantity == 3);
-        CHECK(ob.price_level_array.best_ask() == nullptr);
+        CHECK(ob.price_level_array_manager.best_ask() == nullptr);
     }
     std::cout << "Test 9 (SELL-SIDE SWEEP): PASS\n";
 
     {   // TEST 10: sell-side partial, aggressor bigger
         OrderBook ob("TEST", 10000);
         ob.add(Order{1, 10000, 10, 'B'});
-        auto fills = ob.add(Order{2, 10000, 25, 'S'});
+        auto fills = ob.add(Order{2, 10000, 25, 'S'}).fills;
         CHECK(fills.size() == 1);
         CHECK(fills[0].quantity == 10);
         CHECK(fills[0].passive_order_id == 1);
-        CHECK(ob.price_level_array.best_bid() == nullptr);
+        CHECK(ob.price_level_array_manager.best_bid() == nullptr);
         Order* r = head_at(ob, 10000);
         CHECK(r != nullptr && r->order_id == 2 && r->quantity == 15 && r->side == 'S');
     }
@@ -162,7 +160,7 @@ int main() {
     {   // TEST 11: sell-side no cross
         OrderBook ob("TEST", 10000);
         ob.add(Order{1, 10000, 10, 'B'});
-        auto fills = ob.add(Order{2, 10001, 10, 'S'});
+        auto fills = ob.add(Order{2, 10001, 10, 'S'}).fills;
         CHECK(fills.empty());
         Order* b = head_at(ob, 10000);
         CHECK(b != nullptr && b->quantity == 10);
@@ -171,28 +169,28 @@ int main() {
     }
     std::cout << "Test 11 (SELL-SIDE NO CROSS): PASS\n";
 
-    {   // TEST 12: cancel sole order at a level
+    {   // TEST 12: cancel sole order
         OrderBook ob("TEST", 10000);
         ob.add(Order{1, 10000, 10, 'S'});
         CHECK(ob.cancel(1) == true);
         CHECK(head_at(ob, 10000) == nullptr);
-        CHECK(ob.price_level_array.best_ask() == nullptr);
+        CHECK(ob.price_level_array_manager.best_ask() == nullptr);
     }
     std::cout << "Test 12 (CANCEL SOLE): PASS\n";
 
-    {   // TEST 13: cancel one of two at same level
+    {   // TEST 13: cancel one of two
         OrderBook ob("TEST", 10000);
         ob.add(Order{1, 10000, 10, 'S'});
         ob.add(Order{2, 10000, 10, 'S'});
         CHECK(ob.cancel(1) == true);
-        PriceLevel* lvl = ob.price_level_array.get_price_level(10000);
+        PriceLevel* lvl = ob.price_level_array_manager.get_price_level(10000);
         CHECK(lvl->head != nullptr && lvl->head->order_id == 2);
         CHECK(lvl->tail != nullptr && lvl->tail->order_id == 2);
         CHECK(lvl->head == lvl->tail);
     }
     std::cout << "Test 13 (CANCEL ONE OF TWO): PASS\n";
 
-    {   // TEST 14: cancel nonexistent id
+    {   // TEST 14: cancel nonexistent
         OrderBook ob("TEST", 10000);
         ob.add(Order{1, 10000, 10, 'S'});
         CHECK(ob.cancel(99) == false);
@@ -201,26 +199,26 @@ int main() {
     }
     std::cout << "Test 14 (CANCEL NONEXISTENT): PASS\n";
 
-    {   // TEST 15: cancel an already-filled order
+    {   // TEST 15: cancel already-filled
         OrderBook ob("TEST", 10000);
         ob.add(Order{1, 10000, 10, 'S'});
-        ob.add(Order{2, 10000, 10, 'B'});     // fully fills id 1
-        CHECK(ob.cancel(1) == false);         // id 1 no longer resting
-        CHECK(ob.cancel(2) == false);         // id 2 never rested
-        CHECK(ob.price_level_array.best_ask() == nullptr);
-        CHECK(ob.price_level_array.best_bid() == nullptr);
+        ob.add(Order{2, 10000, 10, 'B'});
+        CHECK(ob.cancel(1) == false);
+        CHECK(ob.cancel(2) == false);
+        CHECK(ob.price_level_array_manager.best_ask() == nullptr);
+        CHECK(ob.price_level_array_manager.best_bid() == nullptr);
     }
     std::cout << "Test 15 (CANCEL ALREADY-FILLED): PASS\n";
 
-    {   // TEST 16: cancel a partially-filled remainder
+    {   // TEST 16: cancel partial remainder
         OrderBook ob("TEST", 10000);
         ob.add(Order{1, 10000, 25, 'S'});
-        ob.add(Order{2, 10000, 10, 'B'});     // leaves 15 resting
+        ob.add(Order{2, 10000, 10, 'B'});
         Order* r = head_at(ob, 10000);
         CHECK(r != nullptr && r->quantity == 15);
         CHECK(ob.cancel(1) == true);
         CHECK(head_at(ob, 10000) == nullptr);
-        CHECK(ob.price_level_array.best_ask() == nullptr);
+        CHECK(ob.price_level_array_manager.best_ask() == nullptr);
     }
     std::cout << "Test 16 (CANCEL PARTIAL REMAINDER): PASS\n";
 
@@ -228,21 +226,23 @@ int main() {
         OrderBook ob("TEST", 10000);
         ob.add(Order{1, 10000, 10, 'S'});
         auto res = ob.replace(1, Order{2, 10001, 5, 'S'});
-        CHECK(res.replaced == true);
-        CHECK(res.fills.empty());
+        CHECK(res.canceled == true);
+        CHECK(res.add_result.fills.empty());
+        CHECK(res.add_result.added == true);
         CHECK(head_at(ob, 10000) == nullptr);
         Order* r = head_at(ob, 10001);
         CHECK(r != nullptr && r->order_id == 2 && r->quantity == 5);
     }
     std::cout << "Test 17 (REPLACE SUCCESS): PASS\n";
 
-    {   // TEST 18: replace missing id -> reject, add nothing
+    {   // TEST 18: replace missing id
         OrderBook ob("TEST", 10000);
         ob.add(Order{1, 10000, 10, 'S'});
         auto res = ob.replace(99, Order{2, 10000, 5, 'B'});
-        CHECK(res.replaced == false);
-        CHECK(res.fills.empty());
-        CHECK(ob.price_level_array.best_bid() == nullptr);   // new order did NOT rest
+        CHECK(res.canceled == false);
+        CHECK(res.add_result.fills.empty());
+        CHECK(res.add_result.added == false);
+        CHECK(ob.price_level_array_manager.best_bid() == nullptr);
         Order* a = head_at(ob, 10000);
         CHECK(a != nullptr && a->order_id == 1 && a->quantity == 10);
     }
@@ -253,11 +253,11 @@ int main() {
         ob.add(Order{1, 10000, 10, 'S'});
         ob.add(Order{2, 10000, 10, 'S'});
         auto res = ob.replace(1, Order{3, 10000, 10, 'S'});
-        CHECK(res.replaced == true);
-        CHECK(res.fills.empty());
-        PriceLevel* lvl = ob.price_level_array.get_price_level(10000);
-        CHECK(lvl->head->order_id == 2);     // id 2 now first
-        CHECK(lvl->tail->order_id == 3);     // replacement at back
+        CHECK(res.canceled == true);
+        CHECK(res.add_result.fills.empty());
+        PriceLevel* lvl = ob.price_level_array_manager.get_price_level(10000);
+        CHECK(lvl->head->order_id == 2);
+        CHECK(lvl->tail->order_id == 3);
     }
     std::cout << "Test 19 (REPLACE LOSES QUEUE POSITION): PASS\n";
 

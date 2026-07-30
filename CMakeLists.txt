@@ -6,3 +6,4 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_executable(main main.cpp)
 add_executable(oracle_checkV2 oracle_checkV2.cpp)
+add_executable(rewrite_checkv2 orderbookv2_rewrite_check.cpp)
