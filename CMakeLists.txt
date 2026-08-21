@@ -33,3 +33,5 @@ target_link_libraries(spsc_bench PRIVATE Threads::Threads)
 # --- Block 3: protocol I/O ---
 add_executable(echo_server echo_server.cpp)
 target_link_libraries(echo_server PRIVATE Threads::Threads)
+
+add_executable(dribble_client dribble_client.cpp)
